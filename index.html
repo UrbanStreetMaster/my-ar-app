@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>AR Turning Radius Tool</title>
+    <!-- Essential Libraries for 2026 WebAR -->
+    <script src="aframe.io"></script>
+    <script src="raw.githack.com"></script>
+</head>
+<body style="margin: 0; overflow: hidden;">
+    <a-scene embedded arjs="sourceType: webcam; debugUIEnabled: false;">
+        <!-- The 'Floor' that listens for your taps -->
+        
+        
+        <!-- Turning Radius Overlay (Initially hidden) -->
+        <a-ring id="turningCircle" color="blue" radius-inner="3.9" radius-outer="4.1" 
+                rotation="-90 0 0" position="0 0 0" visible="false"></a-ring>
+
+        
+    </a-scene>
+
+    <!-- Logic to handle measuring and drawing -->
+    <script>
+        let points = [];
+        const scene = document.querySelector('a-scene');
+
+        scene.addEventListener('click', function (event) {
+            // Get the 3D position where you tapped the ground
+            const touchPoint = event.detail.intersection.point;
+            points.push(touchPoint);
+
+            if (points.length === 2) {
+                // Math: Calculate distance between tap 1 and tap 2
+                const p1 = points[0];
+                const p2 = points[1];
+                const distance = Math.sqrt(
+                    Math.pow(p2.x - p1.x, 2) + Math.pow(p2.z - p1.z, 2)
+                );
+
+                // Update the AR circle to match this real-world radius
+                const circle = document.getElementById('turningCircle');
+                circle.setAttribute('position', `${p1.x} ${p1.y} ${p1.z}`);
+                circle.setAttribute('radius-inner', distance - 0.1);
+                circle.setAttribute('radius-outer', distance + 0.1);
+                circle.setAttribute('visible', 'true');
+
+                // Clear points for next measurement
+                points = [];
+                alert(`Turning Radius Set: ${distance.toFixed(2)} meters`);
+            }
+        });
+    </script>
+</body>
+</html>
