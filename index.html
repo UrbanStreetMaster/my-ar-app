@@ -1,54 +1,70 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>AR Turning Radius Tool</title> 
-    <!-- Essential Libraries for 2026 WebAR -->
+    <title>AR Turning Radius Tool</title>
     <script src="aframe.io"></script>
     <script src="raw.githack.com"></script>
+    <style>
+        /* This styles your 'Start' screen */
+        #overlay {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.8); z-index: 999;
+            display: flex; flex-direction: column; justify-content: center; align-items: center;
+            color: white; font-family: sans-serif;
+        }
+        button {
+            padding: 15px 30px; font-size: 20px; cursor: pointer;
+            background: #2196F3; color: white; border: none; border-radius: 5px;
+        }
+    </style>
 </head>
 <body style="margin: 0; overflow: hidden;">
-    <a-scene embedded arjs="sourceType: webcam; debugUIEnabled: false;">
-        <!-- The 'Floor' that listens for your taps -->
+    <!-- The Start Screen -->
+    <div id="overlay">
+        <h1>Vehicle AR Tool</h1>
+        <p>Step into an open space before starting.</p>
+        <button onclick="startAR()">START AR</button>
+    </div>
+
+    <!-- The AR Scene (Starts Hidden) -->
+    <a-scene style="display: none;" embedded arjs="sourceType: webcam; debugUIEnabled: false;">
         
-        
-        <!-- Turning Radius Overlay (Initially hidden) -->
         <a-ring id="turningCircle" color="blue" radius-inner="3.9" radius-outer="4.1" 
                 rotation="-90 0 0" position="0 0 0" visible="false"></a-ring>
-
         
     </a-scene>
 
-    <!-- Logic to handle measuring and drawing -->
     <script>
+        function startAR() {
+            // 1. Hide the button screen
+            document.getElementById('overlay').style.display = 'none';
+            // 2. Show and start the AR camera
+            document.querySelector('a-scene').style.display = 'block';
+            
+            // 3. Request permissions (Crucial for iOS 2026)
+            if (typeof DeviceOrientationEvent.requestPermission === 'function') {
+                DeviceOrientationEvent.requestPermission();
+            }
+        }
+
+        // Logic for measuring (Tapping ground)
         let points = [];
         const scene = document.querySelector('a-scene');
-
         scene.addEventListener('click', function (event) {
-            // Get the 3D position where you tapped the ground
             const touchPoint = event.detail.intersection.point;
             points.push(touchPoint);
-
             if (points.length === 2) {
-                // Math: Calculate distance between tap 1 and tap 2
                 const p1 = points[0];
                 const p2 = points[1];
-                const distance = Math.sqrt(
-                    Math.pow(p2.x - p1.x, 2) + Math.pow(p2.z - p1.z, 2)
-                );
-
-                // Update the AR circle to match this real-world radius
+                const distance = Math.sqrt(Math.pow(p2.x - p1.x, 2) + Math.pow(p2.z - p1.z, 2));
                 const circle = document.getElementById('turningCircle');
                 circle.setAttribute('position', `${p1.x} ${p1.y} ${p1.z}`);
                 circle.setAttribute('radius-inner', distance - 0.1);
                 circle.setAttribute('radius-outer', distance + 0.1);
                 circle.setAttribute('visible', 'true');
-
-                // Clear points for next measurement
                 points = [];
-                alert(`Turning Radius Set: ${distance.toFixed(2)} meters`);
             }
         });
     </script>
 </body>
 </html>
-
