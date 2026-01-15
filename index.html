@@ -1,66 +1,64 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>AR Turning Radius Tool</title>
+    <title>Professional AR Tool</title>
     <script src="aframe.io"></script>
     <script src="raw.githack.com"></script>
     <style>
-        /* This styles your 'Start' screen */
+        body { margin: 0; overflow: hidden; background-color: #000; } /* Black background prevents blank white screens */
         #overlay {
             position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-            background: rgba(0,0,0,0.8); z-index: 999;
-            display: flex; flex-direction: column; justify-content: center; align-items: center;
-            color: white; font-family: sans-serif;
+            background: #111; z-index: 999; display: flex; flex-direction: column;
+            justify-content: center; align-items: center; color: white;
         }
-        button {
-            padding: 15px 30px; font-size: 20px; cursor: pointer;
-            background: #2196F3; color: white; border: none; border-radius: 5px;
-        }
+        button { padding: 20px 40px; font-size: 22px; background: #2196F3; color: white; border: none; border-radius: 10px; }
+        #ui-controls { position: fixed; bottom: 20px; width: 100%; text-align: center; z-index: 1000; display: none; }
     </style>
 </head>
-<body style="margin: 0; overflow: hidden;">
-    <!-- The Start Screen -->
+<body>
     <div id="overlay">
-        <h1>Vehicle AR Tool</h1>
-        <p>Step into an open space before starting.</p>
-        <button onclick="startAR()">START AR</button>
+        <h2>Vehicle Turning Radius</h2>
+        <button onclick="startAR()">START ENGINE</button>
     </div>
 
-    <!-- The AR Scene (Starts Hidden) -->
-    <a-scene style="display: none;" embedded arjs="sourceType: webcam; debugUIEnabled: false;">
+    <div id="ui-controls">
+        <button onclick="location.reload()" style="background: #f44336; font-size: 14px;">RESET APP</button>
+    </div>
+
+    <!-- Added 'renderer' settings to force visibility on iOS -->
+    <a-scene embedded arjs="sourceType: webcam; debugUIEnabled: false;" 
+             renderer="antialias: true; alpha: false; logarithmicDepthBuffer: true;">
         
-        <a-ring id="turningCircle" color="blue" radius-inner="3.9" radius-outer="4.1" 
+        
+        <!-- Turning Radius (Visible after 2 taps) -->
+        <a-ring id="turningCircle" color="#00ff00" radius-inner="3.9" radius-outer="4.1" 
                 rotation="-90 0 0" position="0 0 0" visible="false"></a-ring>
+        
         
     </a-scene>
 
     <script>
         function startAR() {
-            // 1. Hide the button screen
             document.getElementById('overlay').style.display = 'none';
-            // 2. Show and start the AR camera
-            document.querySelector('a-scene').style.display = 'block';
+            document.getElementById('ui-controls').style.display = 'block';
             
-            // 3. Request permissions (Crucial for iOS 2026)
-            if (typeof DeviceOrientationEvent.requestPermission === 'function') {
+            // Forces iOS 26 to activate motion sensors
+            if (window.DeviceOrientationEvent && typeof DeviceOrientationEvent.requestPermission === 'function') {
                 DeviceOrientationEvent.requestPermission();
             }
         }
 
-        // Logic for measuring (Tapping ground)
         let points = [];
         const scene = document.querySelector('a-scene');
         scene.addEventListener('click', function (event) {
             const touchPoint = event.detail.intersection.point;
             points.push(touchPoint);
             if (points.length === 2) {
-                const p1 = points[0];
-                const p2 = points[1];
-                const distance = Math.sqrt(Math.pow(p2.x - p1.x, 2) + Math.pow(p2.z - p1.z, 2));
+                const distance = Math.sqrt(Math.pow(points[1].x - points[0].x, 2) + Math.pow(points[1].z - points[0].z, 2));
                 const circle = document.getElementById('turningCircle');
-                circle.setAttribute('position', `${p1.x} ${p1.y} ${p1.z}`);
-                circle.setAttribute('radius-inner', distance - 0.1);
-                circle.setAttribute('radius-outer', distance + 0.1);
+                circle.setAttribute('position', `${points[0].x} ${points[0].y} ${points[0].z}`);
+                circle.setAttribute('radius-inner', distance - 0.05);
+                circle.setAttribute('radius-outer', distance + 0.05);
                 circle.setAttribute('visible', 'true');
                 points = [];
             }
