@@ -1,68 +1,471 @@
-<!DOCTYPE html>
-<html>
+<!doctype html>
+<html lang="en">
 <head>
-    <title>Professional AR Tool</title>
-    <script src="aframe.io"></script>
-    <script src="raw.githack.com"></script>
-    <style>
-        body { margin: 0; overflow: hidden; background-color: #000; } /* Black background prevents blank white screens */
-        #overlay {
-            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-            background: #111; z-index: 999; display: flex; flex-direction: column;
-            justify-content: center; align-items: center; color: white;
-        }
-        button { padding: 20px 40px; font-size: 22px; background: #2196F3; color: white; border: none; border-radius: 10px; }
-        #ui-controls { position: fixed; bottom: 20px; width: 100%; text-align: center; z-index: 1000; display: none; }
-    </style>
+  <meta charset="utf-8" />
+  <title>AR Turning Envelope — WebXR</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1,minimum-scale=1,maximum-scale=1" />
+
+  <!-- three.js and AR helpers -->
+  <script src="https://cdn.jsdelivr.net/npm/three@0.152.2/build/three.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.152.2/examples/jsm/webxr/ARButton.js"></script>
+  <style>
+    html,body { height:100%; margin:0; overflow:hidden; background:#000; font-family:system-ui,-apple-system,Segoe UI,Roboto,"Helvetica Neue",Arial; }
+    #overlay {
+      position: absolute; inset:0; display:flex; flex-direction:column; gap:12px;
+      align-items:center; justify-content:center; z-index:4;
+      background: linear-gradient(180deg, rgba(0,0,0,0.85), rgba(0,0,0,0.55));
+      color:#fff; padding:20px; box-sizing:border-box; text-align:center;
+    }
+    .controls { position: absolute; left: 50%; transform: translateX(-50%); bottom: 18px; z-index:3; display:flex; gap:8px; }
+    .btn { padding:10px 14px; border-radius:8px; border:none; font-weight:600; cursor:pointer; }
+    .primary { background:#1976d2; color:#fff; }
+    .accent { background:#f57c00; color:#fff; }
+    .danger { background:#d32f2f; color:#fff; }
+    #status { position: absolute; top:12px; left:12px; z-index:3; color:#fff; font-weight:600; text-shadow:0 1px 2px rgba(0,0,0,0.8); }
+    #debug { position:absolute; top:12px; right:12px; z-index:3; color:#fff; background:rgba(0,0,0,0.45); padding:8px; border-radius:6px; font-family:monospace; display:none; }
+    a { color:#88f; }
+  </style>
 </head>
 <body>
-    <div id="overlay">
-        <h2>Vehicle Turning Radius</h2>
-        <button onclick="startAR()">START ENGINE</button>
+  <div id="overlay">
+    <h1>Turning Envelope (WebXR)</h1>
+    <p style="max-width:640px">
+      Point at the ground at the corner and press START AR. Then:
+      <ol style="text-align:left; margin:8px 0 0 18px;">
+        <li>Tap the ground once to place the vehicle start position.</li>
+        <li>Tap a second time to set the vehicle heading (forward direction).</li>
+        <li>Use RECORD (walk a smooth outer-arc) or ADD POINT to mark tap points along the curb (hybrid).</li>
+        <li>Press STOP to compute the best-fit turning circle and show the swept envelope for the preset "N. American ladder fire truck" (width ≈ 2.60 m).</li>
+      </ol>
+    </p>
+    <div style="display:flex;gap:10px">
+      <button id="startXR" class="btn primary">START AR</button>
+      <button id="dismiss" class="btn" onclick="hideOverlay()">CONTINUE LATER</button>
     </div>
+    <p style="opacity:.9; font-size:13px; margin-top:6px">WebXR required (Chrome Android / supported devices). If your browser doesn't support WebXR you'll see an error.</p>
+  </div>
 
-    <div id="ui-controls">
-        <button onclick="location.reload()" style="background: #f44336; font-size: 14px;">RESET APP</button>
-    </div>
+  <div id="status"></div>
+  <pre id="debug"></pre>
 
-    <!-- Added 'renderer' settings to force visibility on iOS -->
-    <a-scene embedded arjs="sourceType: webcam; debugUIEnabled: false;" 
-             renderer="antialias: true; alpha: false; logarithmicDepthBuffer: true;">
-        
-        
-        <!-- Turning Radius (Visible after 2 taps) -->
-        <a-ring id="turningCircle" color="#00ff00" radius-inner="3.9" radius-outer="4.1" 
-                rotation="-90 0 0" position="0 0 0" visible="false"></a-ring>
-        
-        
-    </a-scene>
+  <div class="controls" id="controls" style="display:none">
+    <button id="placeBtn" class="btn">Place / Heading</button>
+    <button id="recordBtn" class="btn primary">RECORD</button>
+    <button id="addPointBtn" class="btn">ADD POINT</button>
+    <button id="stopBtn" class="btn accent" style="display:none">STOP</button>
+    <button id="resetBtn" class="btn danger">RESET</button>
+  </div>
 
-    <script>
-        function startAR() {
-            document.getElementById('overlay').style.display = 'none';
-            document.getElementById('ui-controls').style.display = 'block';
-            
-            // Forces iOS 26 to activate motion sensors
-            if (window.DeviceOrientationEvent && typeof DeviceOrientationEvent.requestPermission === 'function') {
-                DeviceOrientationEvent.requestPermission();
-            }
-        }
+  <script>
+  // ---------- Configuration ----------
+  // Preset: North-American ladder fire truck (approx max width allowed on US roads ~ 8.5 ft = 2.59 m)
+  const FIRE_TRUCK_WIDTH_M = 2.60; // meters (used to produce swept band thickness)
 
-        let points = [];
-        const scene = document.querySelector('a-scene');
-        scene.addEventListener('click', function (event) {
-            const touchPoint = event.detail.intersection.point;
-            points.push(touchPoint);
-            if (points.length === 2) {
-                const distance = Math.sqrt(Math.pow(points[1].x - points[0].x, 2) + Math.pow(points[1].z - points[0].z, 2));
-                const circle = document.getElementById('turningCircle');
-                circle.setAttribute('position', `${points[0].x} ${points[0].y} ${points[0].z}`);
-                circle.setAttribute('radius-inner', distance - 0.05);
-                circle.setAttribute('radius-outer', distance + 0.05);
-                circle.setAttribute('visible', 'true');
-                points = [];
-            }
-        });
-    </script>
+  // ---------- three.js + WebXR setup ----------
+  let camera, scene, renderer;
+  let reticle; // placement reticle
+  let controller;
+  let hitTestSource = null;
+  let localRefSpace = null;
+  let session = null;
+
+  // App state
+  let startPose = null;      // {position: Vector3, heading: Vector3} (heading is unit forward in world)
+  let awaitingHeading = false;
+  let samples = [];          // sampled ground points {x,z}
+  let recording = false;
+  let sampleInterval = null;
+  const SAMPLE_MS = 150;
+  let envelopeMesh = null;
+  let ringGroup = null;
+  let debugEl = document.getElementById('debug');
+  let statusEl = document.getElementById('status');
+
+  function logStatus(text) { statusEl.textContent = text; }
+  function showDebug(text) { debugEl.style.display='block'; debugEl.textContent = text; }
+  function hideDebug() { debugEl.style.display='none'; debugEl.textContent=''; }
+
+  // create scene
+  function init() {
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+
+    scene = new THREE.Scene();
+    camera = new THREE.PerspectiveCamera(70, window.innerWidth/window.innerHeight, 0.01, 20);
+
+    renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+    renderer.setPixelRatio(window.devicePixelRatio);
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.xr.enabled = true;
+    container.appendChild(renderer.domElement);
+
+    // Reticle to show hit-test placement
+    reticle = new THREE.Mesh(
+      new THREE.RingGeometry(0.08, 0.12, 32).rotateX(-Math.PI/2),
+      new THREE.MeshBasicMaterial({ color: 0x00ffcc, opacity: 0.9, transparent: true })
+    );
+    reticle.matrixAutoUpdate = false;
+    reticle.visible = false;
+    scene.add(reticle);
+
+    // Controller for input (select events)
+    controller = renderer.xr.getController(0);
+    controller.addEventListener('select', onSelect); // tap / screen center select
+    scene.add(controller);
+
+    // minimal lighting for any 3D helpers
+    scene.add(new THREE.HemisphereLight(0xffffff, 0xbbbbff, 0.3));
+    window.addEventListener('resize', onWindowResize);
+
+    // UI wiring
+    document.getElementById('startXR').addEventListener('click', startXR);
+    document.getElementById('placeBtn').addEventListener('click', ()=>{ logStatus('Tap the screen center to place/start heading — or use ADD POINT to mark points.'); });
+    document.getElementById('recordBtn').addEventListener('click', startRecord);
+    document.getElementById('stopBtn').addEventListener('click', stopRecord);
+    document.getElementById('addPointBtn').addEventListener('click', addPointFromReticle);
+    document.getElementById('resetBtn').addEventListener('click', resetAll);
+  }
+
+  function onWindowResize() {
+    camera.aspect = window.innerWidth/window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+  }
+
+  // ---------- WebXR AR start & hit-test ----------
+  async function startXR() {
+    if (!navigator.xr) {
+      alert('WebXR not available on this device/browser. Try Chrome on Android with ARCore support.');
+      return;
+    }
+    // Request session with hit-test
+    try {
+      session = await navigator.xr.requestSession('immersive-ar', {
+        requiredFeatures: ['hit-test','local-floor'],
+        optionalFeatures: ['dom-overlay'],
+        domOverlay: { root: document.body } // keep UI visible if supported
+      });
+    } catch (err) {
+      alert('Could not start AR session: ' + err);
+      return;
+    }
+
+    document.getElementById('overlay').style.display = 'none';
+    document.getElementById('controls').style.display = 'flex';
+    // set renderer session
+    renderer.xr.setReferenceSpaceType('local-floor');
+    await renderer.xr.setSession(session);
+    localRefSpace = await session.requestReferenceSpace('local-floor');
+    // hit test source (viewer-based)
+    const viewerRefSpace = await session.requestReferenceSpace('viewer');
+    hitTestSource = await session.requestHitTestSource({ space: viewerRefSpace });
+
+    // Animate
+    renderer.setAnimationLoop(onXRFrame);
+
+    // Listen for end
+    session.addEventListener('end', onSessionEnded);
+    logStatus('AR ready. Tap the screen center to place start position (select).');
+  }
+
+  function onSessionEnded() {
+    hitTestSource = null;
+    renderer.setAnimationLoop(null);
+    session = null;
+    logStatus('AR session ended.');
+  }
+
+  // each XR frame: update reticle from hit-test, render
+  function onXRFrame(time, xrFrame) {
+    const session = xrFrame.session;
+    const pose = xrFrame.getViewerPose(localRefSpace);
+    if (hitTestSource && xrFrame) {
+      const hitTestResults = xrFrame.getHitTestResults(hitTestSource);
+      if (hitTestResults.length > 0) {
+        const hit = hitTestResults[0];
+        const hitPose = hit.getPose(localRefSpace);
+        reticle.visible = true;
+        reticle.matrix.fromArray(hitPose.transform.matrix);
+      } else {
+        reticle.visible = false;
+      }
+    }
+    // render
+    renderer.render(scene, camera);
+  }
+
+  // ---------- Input handlers ----------
+  // 'select' events come from screen-tap (controller)
+  function onSelect() {
+    if (!reticle.visible) {
+      logStatus('No suitable ground hit at center — move phone to point at the ground.');
+      return;
+    }
+    // get world position from reticle's matrix
+    const pos = new THREE.Vector3();
+    pos.setFromMatrixPosition(reticle.matrix);
+
+    if (!startPose) {
+      // first tap -> place start
+      startPose = { position: pos.clone(), heading: null };
+      awaitingHeading = true;
+      addStartMarker(pos);
+      logStatus('Start placed. Tap again to set heading (a forward point).');
+      return;
+    }
+    if (awaitingHeading && startPose) {
+      // second tap -> define heading
+      const forwardPoint = pos.clone();
+      const headingVec = forwardPoint.clone().sub(startPose.position).setY(0).normalize();
+      if (headingVec.length() < 0.1) {
+        logStatus('Heading too small — tap a point somewhat in front of start.');
+        return;
+      }
+      startPose.heading = headingVec;
+      awaitingHeading = false;
+      addHeadingArrow(startPose.position, headingVec);
+      logStatus('Heading set. Use RECORD or ADD POINT to collect arc points, then STOP to compute envelope.');
+      return;
+    }
+    // otherwise treat as add-point (hybrid)
+    addPointFromReticle();
+  }
+
+  // Add a small marker for start
+  function addStartMarker(position) {
+    const g = new THREE.Group();
+    const mat = new THREE.MeshStandardMaterial({ color: 0x00ccff });
+    const base = new THREE.Mesh(new THREE.CylinderGeometry(0.06,0.06,0.02,16).rotateX(Math.PI/2), mat);
+    base.position.copy(position);
+    g.add(base);
+    g.name = 'startMarker';
+    scene.add(g);
+  }
+
+  // Add heading arrow
+  function addHeadingArrow(position, headingVec) {
+    // remove old arrow if exists
+    const old = scene.getObjectByName('headingArrow');
+    if (old) scene.remove(old);
+    const len = 0.6;
+    const arrowGroup = new THREE.Group();
+    const mat = new THREE.MeshStandardMaterial({ color: 0xffcc00 });
+    const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.02,0.02,len,12), mat);
+    shaft.rotation.x = Math.PI/2;
+    shaft.position.copy(position).add(new THREE.Vector3(headingVec.x*len/2, 0.02, headingVec.z*len/2));
+    arrowGroup.add(shaft);
+    const head = new THREE.Mesh(new THREE.ConeGeometry(0.06,0.12,12), mat);
+    head.position.copy(position).add(new THREE.Vector3(headingVec.x*len, 0.06, headingVec.z*len));
+    head.quaternion.setFromUnitVectors(new THREE.Vector3(0,1,0), new THREE.Vector3(headingVec.x,0,headingVec.z).normalize());
+    arrowGroup.add(head);
+    arrowGroup.name='headingArrow';
+    scene.add(arrowGroup);
+  }
+
+  // ADD POINT via current reticle position (tap-to-mark)
+  function addPointFromReticle() {
+    if (!reticle.visible) { logStatus('No ground hit to add point.'); return; }
+    const p = new THREE.Vector3().setFromMatrixPosition(reticle.matrix);
+    // project to ground plane: keep x,z
+    samples.push({ x: p.x, z: p.z });
+    addSampleMarker(p);
+    showDebug(`points: ${samples.length}`);
+    logStatus(`Added point ${samples.length}.`);
+  }
+
+  function addSampleMarker(position) {
+    const m = new THREE.Mesh(new THREE.SphereGeometry(0.03,8,8), new THREE.MeshBasicMaterial({ color: 0xff4444 }));
+    m.position.copy(position);
+    m.name = 'samplePoint';
+    scene.add(m);
+  }
+
+  // ---------- Recording (walk-to-record) ----------
+  function startRecord() {
+    if (!session) { alert('Start AR first.'); return; }
+    if (!startPose || !startPose.heading) { alert('Place start and heading first (two taps).'); return; }
+    samples = []; // reset
+    recording = true;
+    document.getElementById('recordBtn').style.display = 'none';
+    document.getElementById('stopBtn').style.display = 'inline-block';
+    logStatus('Recording — walk a smooth arc near the curb. App will sample your camera position.');
+    samplePosition(); // take immediate sample
+    sampleInterval = setInterval(samplePosition, SAMPLE_MS);
+  }
+
+  function samplePosition() {
+    // use camera world pos projected to ground (y of reticle or y=0 if not known)
+    const cam = renderer.xr.getCamera(camera);
+    const worldPos = new THREE.Vector3();
+    cam.getWorldPosition(worldPos);
+    // determine ground Y: use reticle y if visible, or use localRefSpace origin height (0)
+    let groundY = 0;
+    if (reticle.visible) {
+      const rp = new THREE.Vector3().setFromMatrixPosition(reticle.matrix);
+      groundY = rp.y;
+    } else {
+      groundY = 0;
+    }
+    const groundPoint = new THREE.Vector3(worldPos.x, groundY, worldPos.z);
+    samples.push({ x: groundPoint.x, z: groundPoint.z });
+    addSampleMarker(groundPoint);
+    showDebug(`recording samples: ${samples.length}`);
+  }
+
+  function stopRecord() {
+    recording = false;
+    clearInterval(sampleInterval);
+    document.getElementById('recordBtn').style.display = 'inline-block';
+    document.getElementById('stopBtn').style.display = 'none';
+    logStatus('Stopped recording — computing best-fit circle...');
+    if (samples.length < 6) {
+      logStatus('Not enough samples (need ~6+). Use ADD POINT or RECORD longer and try again.');
+      return;
+    }
+    computeAndRenderEnvelope();
+  }
+
+  // ---------- Compute circle fit & render envelope ----------
+  function computeAndRenderEnvelope() {
+    // Fit circle to (x,z)
+    const pts = samples.map(s => ({ x: s.x, y: s.z }));
+    const circle = fitCircle(pts);
+    if (!circle || !isFinite(circle.r)) {
+      logStatus('Could not compute circle — try recording a smoother arc or more of the curve.');
+      return;
+    }
+    // outer radius (distance from center to outermost point)
+    const centerX = circle.x, centerZ = circle.y, radius = circle.r;
+    // Create annulus: outer = radius, inner = radius - vehicle width (approx). Ensure inner >= 0.1m
+    const inner = Math.max(0.05, radius - FIRE_TRUCK_WIDTH_M);
+    const outer = Math.max(inner + 0.02, radius);
+    // Ground Y from reticle if available else 0
+    const groundY = reticle.visible ? (new THREE.Vector3().setFromMatrixPosition(reticle.matrix).y) : 0;
+    renderAnnulus(centerX, groundY + 0.001, centerZ, inner, outer);
+    logStatus(`Envelope computed — outer r ${(outer).toFixed(2)} m, inner r ${(inner).toFixed(2)} m (preset truck width ${FIRE_TRUCK_WIDTH_M.toFixed(2)} m).`);
+    showDebug(`center: x=${centerX.toFixed(3)} z=${centerZ.toFixed(3)} r=${radius.toFixed(3)} pts:${samples.length}`);
+  }
+
+  // create ring geometry lying on XZ plane using THREE.RingGeometry and rotate appropriately
+  function renderAnnulus(cx, cy, cz, innerR, outerR) {
+    // remove old
+    if (ringGroup) scene.remove(ringGroup);
+    ringGroup = new THREE.Group();
+    const geometry = new THREE.RingGeometry(innerR, outerR, 128);
+    const material = new THREE.MeshBasicMaterial({ color: 0x00ff66, opacity: 0.35, transparent: true, side: THREE.DoubleSide });
+    const mesh = new THREE.Mesh(geometry, material);
+    // ring geometry is in XY plane — rotate to XZ
+    mesh.rotateX(-Math.PI/2);
+    mesh.position.set(cx, cy, cz);
+    ringGroup.add(mesh);
+
+    // Outline for clarity
+    const outlineMat = new THREE.LineBasicMaterial({ color:0x00ff66 });
+    const innerCircle = new THREE.LineLoop(new THREE.CircleGeometry(innerR, 64), outlineMat);
+    innerCircle.geometry.vertices.shift && innerCircle.geometry.vertices.shift(); // compatibility (some three versions)
+    innerCircle.rotation.x = -Math.PI/2;
+    innerCircle.position.set(cx, cy+0.002, cz);
+    ringGroup.add(innerCircle);
+
+    const outerCircle = new THREE.LineLoop(new THREE.CircleGeometry(outerR, 128), outlineMat);
+    outerCircle.geometry.vertices.shift && outerCircle.geometry.vertices.shift();
+    outerCircle.rotation.x = -Math.PI/2;
+    outerCircle.position.set(cx, cy+0.003, cz);
+    ringGroup.add(outerCircle);
+
+    scene.add(ringGroup);
+    envelopeMesh = mesh;
+  }
+
+  // ---------- Utilities: circle fit (algebraic least-squares) ----------
+  function fitCircle(points) {
+    // points: [{x,y}, ...] where here y is z in world
+    const n = points.length;
+    let Sx=0, Sy=0, Sxx=0, Syy=0, Sxy=0;
+    for (let i=0;i<n;i++) {
+      const x = points[i].x, y = points[i].y;
+      Sx += x; Sy += y;
+      Sxx += x*x; Syy += y*y; Sxy += x*y;
+    }
+    // Assemble ATA and ATb for linear system solving (same method as Taubin/linear algebraic)
+    const ATA = [
+      [Sxx, Sxy, Sx],
+      [Sxy, Syy, Sy],
+      [Sx,  Sy,  n ]
+    ];
+    let Sxb=0, Syb=0, Sb=0;
+    for (let i=0;i<n;i++) {
+      const x = points[i].x, y = points[i].y;
+      const b = -(x*x + y*y);
+      Sxb += x*b; Syb += y*b; Sb += b;
+    }
+    const ATb = [Sxb, Syb, Sb];
+    const p = solve3x3(ATA, ATb);
+    if (!p) return null;
+    const D = p[0], E = p[1], F = p[2];
+    const cx = -D/2, cy = -E/2;
+    const r2 = cx*cx + cy*cy - F;
+    if (r2 <= 0) return { x:cx, y:cy, r:0 };
+    const r = Math.sqrt(r2);
+    return { x: cx, y: cy, r: r };
+  }
+
+  // simple 3x3 solver
+  function solve3x3(A,b){
+    const M = [
+      [A[0][0], A[0][1], A[0][2], b[0]],
+      [A[1][0], A[1][1], A[1][2], b[1]],
+      [A[2][0], A[2][1], A[2][2], b[2]]
+    ];
+    const n=3;
+    for (let i=0;i<n;i++){
+      // pivot
+      let maxR=i;
+      for (let k=i+1;k<n;k++) if (Math.abs(M[k][i]) > Math.abs(M[maxR][i])) maxR = k;
+      if (i!==maxR){ const tmp=M[i]; M[i]=M[maxR]; M[maxR]=tmp; }
+      if (Math.abs(M[i][i]) < 1e-12) return null;
+      for (let k=i+1;k<n;k++){
+        const c = M[k][i] / M[i][i];
+        for (let j=i;j<=n;j++) M[k][j] -= c * M[i][j];
+      }
+    }
+    const x = [0,0,0];
+    for (let i=n-1;i>=0;i--){
+      let s = M[i][n];
+      for (let j=i+1;j<n;j++) s -= M[i][j]*x[j];
+      x[i] = s / M[i][i];
+    }
+    return x;
+  }
+
+  // ---------- Reset ----------
+  function resetAll() {
+    // remove markers & ring
+    const toRemove = [];
+    scene.traverse(o => {
+      if (o.name === 'samplePoint' || o.name === 'startMarker' || o.name === 'headingArrow') toRemove.push(o);
+    });
+    toRemove.forEach(o => { if (o.parent) o.parent.remove(o); });
+    if (ringGroup) { scene.remove(ringGroup); ringGroup = null; }
+    samples = []; recording = false;
+    startPose = null; awaitingHeading = false;
+    clearInterval(sampleInterval);
+    document.getElementById('recordBtn').style.display = 'inline-block';
+    document.getElementById('stopBtn').style.display = 'none';
+    logStatus('Reset.');
+    hideDebug();
+  }
+
+  // hide overlay quickly
+  function hideOverlay() { document.getElementById('overlay').style.display='none'; document.getElementById('controls').style.display='flex'; }
+
+  // ---------- Init and helpers ----------
+  init();
+
+  // helpful note for page unload (end session)
+  window.addEventListener('beforeunload', () => {
+    if (session) session.end();
+  });
+  </script>
 </body>
 </html>
